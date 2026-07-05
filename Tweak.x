@@ -1,32 +1,14 @@
 #import <UIKit/UIKit.h>
 
-static NSMutableSet *logged;
-
-static void log(NSString *msg) {
-    NSLog(@"[MKTabHider] %@", msg);
-    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
-    if (paths.count) {
-        NSString *path = [paths[0] stringByAppendingPathComponent:@"MKTabHider.log"];
-        NSString *line = [NSString stringWithFormat:@"%@ %@\n", [NSDate date], msg];
-        NSFileHandle *fh = [NSFileHandle fileHandleForWritingAtPath:path];
-        if (!fh) {
-            [line writeToFile:path atomically:NO encoding:NSUTF8StringEncoding error:nil];
-        } else {
-            [fh seekToEndOfFile];
-            [fh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
-            [fh closeFile];
-        }
-    }
-}
-
 %ctor {
-    logged = [NSMutableSet set];
-    log(@"dylib loaded");
+    NSLog(@"[MKTabHider] dylib loaded");
 }
 
 %hook UIViewController
 - (void)viewDidAppear:(BOOL)animated {
     %orig;
+    static NSMutableSet *logged;
+    if (!logged) logged = [NSMutableSet set];
     NSString *cls = NSStringFromClass([self class]);
     if ([logged containsObject:cls]) return;
     [logged addObject:cls];
@@ -38,6 +20,6 @@ static void log(NSString *msg) {
         [names addObject:NSStringFromClass([v class])];
         if (++count >= 10) break;
     }
-    log([NSString stringWithFormat:@"VC: %@ | subs: %@", cls, [names componentsJoinedByString:@", "]]);
+    NSLog(@"[MKTabHider] VC: %@ | subs: %@", cls, [names componentsJoinedByString:@", "]);
 }
 %end
