@@ -1,5 +1,7 @@
 #import <UIKit/UIKit.h>
 
+static NSMutableSet *logged;
+
 static void log(NSString *msg) {
     NSLog(@"[MKTabHider] %@", msg);
     NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
@@ -18,6 +20,7 @@ static void log(NSString *msg) {
 }
 
 %ctor {
+    logged = [NSMutableSet set];
     log(@"dylib loaded");
 }
 
@@ -25,11 +28,16 @@ static void log(NSString *msg) {
 - (void)viewDidAppear:(BOOL)animated {
     %orig;
     NSString *cls = NSStringFromClass([self class]);
+    if ([logged containsObject:cls]) return;
+    [logged addObject:cls];
+    
     NSArray *subs = [self.view subviews];
-    NSMutableArray *subNames = [NSMutableArray array];
+    NSMutableArray *names = [NSMutableArray array];
+    int count = 0;
     for (UIView *v in subs) {
-        [subNames addObject:NSStringFromClass([v class])];
+        [names addObject:NSStringFromClass([v class])];
+        if (++count >= 10) break;
     }
-    log([NSString stringWithFormat:@"VC: %@ subviews: %@", cls, [subNames componentsJoinedByString:@", "]]);
+    log([NSString stringWithFormat:@"VC: %@ | subs: %@", cls, [names componentsJoinedByString:@", "]]);
 }
 %end
