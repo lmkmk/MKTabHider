@@ -1,25 +1,53 @@
 #import <UIKit/UIKit.h>
+#import <Foundation/Foundation.h>
+
+static NSString *logPath(void) {
+    static NSString *path;
+    if (!path) {
+        NSArray *p = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
+        path = [[p[0] stringByAppendingPathComponent:@"MKTabHider.log"] copy];
+    }
+    return path;
+}
+
+static void logToFile(NSString *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    NSString *msg = [[NSString alloc] initWithFormat:fmt arguments:args];
+    va_end(args);
+    
+    NSLog(@"[MKTabHider] %@", msg);
+    
+    NSString *line = [NSString stringWithFormat:@"%@ %@\n", [NSDate date], msg];
+    NSFileHandle *fh = [NSFileHandle fileHandleForWritingAtPath:logPath()];
+    if (fh) {
+        [fh seekToEndOfFile];
+        [fh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+        [fh closeFile];
+    } else {
+        [line writeToFile:logPath() atomically:NO encoding:NSUTF8StringEncoding error:nil];
+    }
+}
 
 %ctor {
-    NSLog(@"[MKTabHider] dylib loaded");
+    logToFile(@"=== MKTabHider loaded ===");
 }
 
 %hook UIViewController
 - (void)viewDidAppear:(BOOL)animated {
     %orig;
-    static NSMutableSet *logged;
-    if (!logged) logged = [NSMutableSet set];
+    static NSMutableSet *seen;
+    if (!seen) seen = [NSMutableSet set];
     NSString *cls = NSStringFromClass([self class]);
-    if ([logged containsObject:cls]) return;
-    [logged addObject:cls];
+    if ([seen containsObject:cls]) return;
+    [seen addObject:cls];
     
-    NSArray *subs = [self.view subviews];
     NSMutableArray *names = [NSMutableArray array];
-    int count = 0;
-    for (UIView *v in subs) {
+    int n = 0;
+    for (UIView *v in self.view.subviews) {
         [names addObject:NSStringFromClass([v class])];
-        if (++count >= 10) break;
+        if (++n >= 5) break;
     }
-    NSLog(@"[MKTabHider] VC: %@ | subs: %@", cls, [names componentsJoinedByString:@", "]);
+    logToFile(@"VC: %@ subviews[0-%d]: %@", cls, n, [names componentsJoinedByString:@", "]);
 }
 %end
