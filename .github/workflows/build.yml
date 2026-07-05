@@ -21,9 +21,8 @@ jobs:
       - name: Download SDK
         run: |
           mkdir -p $THEOS/sdks
-          curl -L -o /tmp/sdk.zip https://github.com/theos/sdks/releases/download/sdks/iPhoneOS16.5.sdk.zip
-          unzip -q /tmp/sdk.zip -d /tmp/sdk_extracted
-          cp -r /tmp/sdk_extracted/iPhoneOS16.5.sdk $THEOS/sdks/
+          curl -L -o /tmp/sdk.tar.xz https://github.com/theos/sdks/releases/download/master-146e41f/iPhoneOS16.5.sdk.tar.xz
+          tar -xf /tmp/sdk.tar.xz -C $THEOS/sdks/
 
       - name: Build
         working-directory: MKTabHider
