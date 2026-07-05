@@ -1,70 +1,98 @@
+#import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 
-static NSString *logPath(void) {
-    static NSString *p;
-    if (!p) {
-        NSArray *arr = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
-        p = [[arr[0] stringByAppendingPathComponent:@"MKTabHider.log"] copy];
-    }
-    return p;
+static void (*orig_setControllers)(id, SEL, NSArray *, id);
+
+static BOOL MKIsBlockedController(id controller) {
+    NSString *className = NSStringFromClass([controller class]);
+    return [className isEqualToString:@"ContactListUI.ContactsController"] ||
+        [className isEqualToString:@"CallListUI.CallListController"];
 }
 
-static void wlog(NSString *fmt, ...) {
-    va_list args;
-    va_start(args, fmt);
-    NSString *msg = [[NSString alloc] initWithFormat:fmt arguments:args];
-    va_end(args);
-    NSString *line = [NSString stringWithFormat:@"%@ %@\n", [NSDate date], msg];
-    NSFileHandle *fh = [NSFileHandle fileHandleForWritingAtPath:logPath()];
-    if (fh) {
-        [fh seekToEndOfFile];
-        [fh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
-        [fh closeFile];
-    } else {
-        [line writeToFile:logPath() atomically:NO encoding:NSUTF8StringEncoding error:nil];
+static NSArray *MKFilteredControllers(NSArray *controllers, NSInteger *removedBeforeSelectedIndex, NSInteger selectedIndex) {
+    NSMutableArray *filtered = [NSMutableArray arrayWithCapacity:controllers.count];
+    NSInteger removedBefore = 0;
+
+    for (NSUInteger index = 0; index < controllers.count; index++) {
+        id controller = [controllers objectAtIndex:index];
+        if (MKIsBlockedController(controller)) {
+            if ((NSInteger)index < selectedIndex) removedBefore++;
+            continue;
+        }
+        [filtered addObject:controller];
     }
+
+    if (removedBeforeSelectedIndex) *removedBeforeSelectedIndex = removedBefore;
+    return filtered;
 }
 
-static void dumpTabSubviews(UIView *v, int depth) {
-    if (depth > 6) return;
-    NSString *pre = [@"" stringByPaddingToLength:depth*2 withString:@" " startingAtIndex:0];
-    wlog(@"%@↳ %@ frame=%@ tag=%ld", pre, NSStringFromClass([v class]), NSStringFromCGRect(v.frame), (long)v.tag);
-    for (UIView *sub in v.subviews) {
-        dumpTabSubviews(sub, depth+1);
-    }
+static id MKRemappedSelectedIndex(id selectedIndex, NSInteger removedBeforeSelectedIndex, NSUInteger filteredCount) {
+    if (!selectedIndex || selectedIndex == [NSNull null]) return selectedIndex;
+    if (![selectedIndex respondsToSelector:@selector(integerValue)]) return selectedIndex;
+    if (filteredCount == 0) return selectedIndex;
+
+    NSInteger value = [selectedIndex integerValue] - removedBeforeSelectedIndex;
+    if (value < 0) value = 0;
+    if (value >= (NSInteger)filteredCount) value = (NSInteger)filteredCount - 1;
+    return @(value);
 }
 
-static void (*orig_root_appear)(id, SEL, BOOL);
-static void hook_root_appear(id self, SEL _cmd, BOOL animated) {
-    orig_root_appear(self, _cmd, animated);
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        UIView *view = [(UIViewController *)self view];
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            wlog(@"=== VIEW TREE ===");
-            dumpTabSubviews(view, 0);
-            wlog(@"=== END TREE ===");
-        });
-    });
+static void hook_setControllers(id self, SEL _cmd, NSArray *controllers, id selectedIndex) {
+    if (![controllers isKindOfClass:[NSArray class]]) {
+        orig_setControllers(self, _cmd, controllers, selectedIndex);
+        return;
+    }
+
+    NSInteger originalSelectedIndex = 0;
+    if (selectedIndex && selectedIndex != [NSNull null] && [selectedIndex respondsToSelector:@selector(integerValue)]) {
+        originalSelectedIndex = [selectedIndex integerValue];
+    }
+
+    NSInteger removedBeforeSelectedIndex = 0;
+    NSArray *filteredControllers = MKFilteredControllers(controllers, &removedBeforeSelectedIndex, originalSelectedIndex);
+    id remappedSelectedIndex = MKRemappedSelectedIndex(selectedIndex, removedBeforeSelectedIndex, filteredControllers.count);
+
+    orig_setControllers(self, _cmd, filteredControllers, remappedSelectedIndex);
 }
 
-static BOOL swizzle(Class cls, SEL sel, IMP hook, IMP *orig) {
-    Method m = class_getInstanceMethod(cls, sel);
-    if (m) {
-        *orig = method_getImplementation(m);
-        method_setImplementation(m, hook);
-        return YES;
+static Method MKFindSetControllersMethod(Class cls, SEL *selector) {
+    SEL preferred = NSSelectorFromString(@"setControllers:selectedIndex:");
+    Method method = class_getInstanceMethod(cls, preferred);
+    if (method) {
+        if (selector) *selector = preferred;
+        return method;
     }
-    return NO;
+
+    unsigned int count = 0;
+    Method *methods = class_copyMethodList(cls, &count);
+    Method found = NULL;
+    SEL foundSelector = NULL;
+
+    for (unsigned int index = 0; index < count; index++) {
+        SEL candidate = method_getName(methods[index]);
+        NSString *name = NSStringFromSelector(candidate);
+        if ([name containsString:@"setControllers"] && [name containsString:@"selectedIndex"]) {
+            found = methods[index];
+            foundSelector = candidate;
+            break;
+        }
+    }
+
+    if (selector) *selector = foundSelector;
+    if (methods) free(methods);
+    return found;
 }
 
 __attribute__((constructor))
 static void MKTabHider_init(void) {
-    wlog(@"=== INIT ===");
-    Class root = NSClassFromString(@"TelegramUI.TelegramRootController");
-    if (root) {
-        BOOL ok = swizzle(root, @selector(viewDidAppear:), (IMP)hook_root_appear, &orig_root_appear);
-        wlog(@"root swizzle appear: %d", ok);
-    }
+    Class cls = NSClassFromString(@"TabBarUI.TabBarControllerImpl");
+    if (!cls) return;
+
+    SEL selector = NULL;
+    Method method = MKFindSetControllersMethod(cls, &selector);
+    if (!method || !selector) return;
+
+    orig_setControllers = (void *)method_getImplementation(method);
+    method_setImplementation(method, (IMP)hook_setControllers);
 }
