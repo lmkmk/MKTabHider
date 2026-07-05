@@ -7,7 +7,7 @@ include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = MKTabHider
 
-MKTabHider_FILES = Tweak.x
+MKTabHider_FILES = Tweak.m
 MKTabHider_CFLAGS = -fobjc-arc -Wno-error
 MKTabHider_FRAMEWORKS = UIKit Foundation
 
