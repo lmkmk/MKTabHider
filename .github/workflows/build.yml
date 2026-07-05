@@ -25,12 +25,11 @@ jobs:
           tar -xf /tmp/sdk.tar.xz -C $THEOS/sdks/
 
       - name: Build
-        working-directory: MKTabHider
         run: make package FINALPACKAGE=1
 
       - name: Extract dylib from deb
         run: |
-          cd MKTabHider/packages
+          cd packages
           ar x *.deb
           tar xf data.tar.*
           mkdir -p ../output
@@ -42,5 +41,5 @@ jobs:
         with:
           name: MKTabHider
           path: |
-            MKTabHider/output/
-            MKTabHider/packages/*.deb
+            output/
+            packages/*.deb
