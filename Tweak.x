@@ -1,53 +1,51 @@
 #import <UIKit/UIKit.h>
-#import <Foundation/Foundation.h>
 
-static NSString *logPath(void) {
-    static NSString *path;
-    if (!path) {
-        NSArray *p = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
-        path = [[p[0] stringByAppendingPathComponent:@"MKTabHider.log"] copy];
-    }
-    return path;
-}
-
-static void logToFile(NSString *fmt, ...) {
-    va_list args;
-    va_start(args, fmt);
-    NSString *msg = [[NSString alloc] initWithFormat:fmt arguments:args];
-    va_end(args);
-    
-    NSLog(@"[MKTabHider] %@", msg);
-    
-    NSString *line = [NSString stringWithFormat:@"%@ %@\n", [NSDate date], msg];
-    NSFileHandle *fh = [NSFileHandle fileHandleForWritingAtPath:logPath()];
-    if (fh) {
-        [fh seekToEndOfFile];
-        [fh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
-        [fh closeFile];
-    } else {
-        [line writeToFile:logPath() atomically:NO encoding:NSUTF8StringEncoding error:nil];
+static void hideTabsInView(UIView *view) {
+    NSArray *banned = @[@"Contacts", @"Calls", @"联系人", @"通话"];
+    for (UIView *sub in view.subviews) {
+        if ([sub respondsToSelector:@selector(text)]) {
+            NSString *t = [sub performSelector:@selector(text)];
+            if ([banned containsObject:t]) {
+                UIView *p = sub.superview;
+                if (p) p.hidden = YES;
+            }
+        }
+        hideTabsInView(sub);
     }
 }
 
-%ctor {
-    logToFile(@"=== MKTabHider loaded ===");
+%hook TelegramUI.TelegramRootController
+
+- (void)addChildViewController:(UIViewController *)child {
+    NSString *cls = NSStringFromClass([child class]);
+    if (![cls containsString:@"Contacts"] && ![cls containsString:@"CallList"]) {
+        %orig;
+    }
 }
 
-%hook UIViewController
 - (void)viewDidAppear:(BOOL)animated {
     %orig;
-    static NSMutableSet *seen;
-    if (!seen) seen = [NSMutableSet set];
-    NSString *cls = NSStringFromClass([self class]);
-    if ([seen containsObject:cls]) return;
-    [seen addObject:cls];
-    
-    NSMutableArray *names = [NSMutableArray array];
-    int n = 0;
-    for (UIView *v in self.view.subviews) {
-        [names addObject:NSStringFromClass([v class])];
-        if (++n >= 5) break;
-    }
-    logToFile(@"VC: %@ subviews[0-%d]: %@", cls, n, [names componentsJoinedByString:@", "]);
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            hideTabsInView(self.view);
+        });
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            hideTabsInView(self.view);
+        });
+    });
+}
+
+%end
+
+%hook ContactListUI.ContactsController
+- (void)viewWillAppear:(BOOL)animated {
+    [self.navigationController popViewControllerAnimated:NO];
+}
+%end
+
+%hook CallListUI.CallListController
+- (void)viewWillAppear:(BOOL)animated {
+    [self.navigationController popViewControllerAnimated:NO];
 }
 %end
