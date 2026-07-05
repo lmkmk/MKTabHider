@@ -1,0 +1,9 @@
+Package: com.mk.tabhider
+Name: MKTabHider
+Version: 1.0
+Architecture: iphoneos-arm
+Description: Hide Contacts and Calls tabs in Telegram, keep only Chats and Settings.
+Maintainer: MK
+Author: MK
+Section: Tweaks
+Depends: mobilesubstrate

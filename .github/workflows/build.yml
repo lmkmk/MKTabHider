@@ -1,0 +1,47 @@
+name: Build MKTabHider
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Theos
+        run: |
+          export THEOS=${{ github.workspace }}/theos
+          git clone --recursive https://github.com/theos/theos.git $THEOS --depth 1
+          echo "THEOS=$THEOS" >> $GITHUB_ENV
+
+      - name: Download SDK
+        run: |
+          mkdir -p $THEOS/sdks
+          curl -L -o /tmp/sdk.zip https://github.com/theos/sdks/releases/download/sdks/iPhoneOS16.5.sdk.zip
+          unzip -q /tmp/sdk.zip -d /tmp/sdk_extracted
+          cp -r /tmp/sdk_extracted/iPhoneOS16.5.sdk $THEOS/sdks/
+
+      - name: Build
+        working-directory: MKTabHider
+        run: make package FINALPACKAGE=1
+
+      - name: Extract dylib from deb
+        run: |
+          cd MKTabHider/packages
+          ar x *.deb
+          tar xf data.tar.*
+          mkdir -p ../output
+          cp Library/MobileSubstrate/DynamicLibraries/MKTabHider.dylib ../output/
+          cp Library/MobileSubstrate/DynamicLibraries/MKTabHider.plist ../output/ 2>/dev/null || true
+
+      - name: Upload dylib + deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: MKTabHider
+          path: |
+            MKTabHider/output/
+            MKTabHider/packages/*.deb
